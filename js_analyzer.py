@@ -125,7 +125,7 @@ class JSAnalyzer:
         
         return True
     
-    def discover_js_files(self, wordlist=None, threads=50, timeout=10):
+    def discover_js_files(self, wordlist=None, full_wordlist=False, threads=50, timeout=10):
         """Menggunakan feroxbuster untuk menemukan file .js"""
         print(f"\n{Fore.CYAN}[*] Memulai discovery file .js menggunakan Feroxbuster...{Style.RESET_ALL}")
         
@@ -133,15 +133,36 @@ class JSAnalyzer:
             print(f"{Fore.RED}[!] Feroxbuster tidak tersedia{Style.RESET_ALL}")
             return False
         
-        # Gunakan wordlist default jika tidak ada
-        if not wordlist:
+        # Logika wordlist:
+        # 1. Jika ada --wordlist, gunakan wordlist custom
+        # 2. Jika ada --full-wordlist, gunakan wordlist lengkap
+        # 3. Jika tidak ada keduanya, gunakan wordlist kecil (hanya "test")
+        
+        if wordlist:
+            # Custom wordlist
+            if not os.path.exists(wordlist):
+                print(f"{Fore.RED}[!] Wordlist tidak ditemukan: {wordlist}{Style.RESET_ALL}")
+                return False
+            print(f"{Fore.YELLOW}[*] Menggunakan wordlist custom: {wordlist}{Style.RESET_ALL}")
+        elif full_wordlist:
+            # Full wordlist
             default_wordlist = "/Users/theninja/SF/SecLists/Discovery/Web-Content/raft-medium-directories.txt"
             if os.path.exists(default_wordlist):
                 wordlist = default_wordlist
-                print(f"{Fore.YELLOW}[*] Menggunakan wordlist default: {wordlist}{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}[*] Menggunakan wordlist lengkap: {wordlist}{Style.RESET_ALL}")
             else:
-                print(f"{Fore.RED}[!] Wordlist harus disediakan dan wordlist default tidak ditemukan{Style.RESET_ALL}")
+                print(f"{Fore.RED}[!] Wordlist lengkap tidak ditemukan: {default_wordlist}{Style.RESET_ALL}")
                 return False
+        else:
+            # Small wordlist (hanya "test")
+            import tempfile
+            temp_wordlist = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+            temp_wordlist.write("test\n")
+            temp_wordlist.close()
+            wordlist = temp_wordlist.name
+            self.temp_wordlist_path = wordlist  # Simpan path untuk cleanup nanti
+            print(f"{Fore.YELLOW}[*] Menggunakan wordlist kecil (hanya 'test'){Style.RESET_ALL}")
+            print(f"{Fore.CYAN}[*] Wordlist sementara: {wordlist}{Style.RESET_ALL}")
         
         # Command feroxbuster
         cmd = [
@@ -171,6 +192,14 @@ class JSAnalyzer:
         except Exception as e:
             print(f"{Fore.RED}[!] Error menjalankan Feroxbuster: {e}{Style.RESET_ALL}")
             return False
+        finally:
+            # Cleanup temporary wordlist jika ada
+            if hasattr(self, 'temp_wordlist_path') and os.path.exists(self.temp_wordlist_path):
+                try:
+                    os.unlink(self.temp_wordlist_path)
+                    print(f"{Fore.CYAN}[*] Temporary wordlist dihapus{Style.RESET_ALL}")
+                except Exception as e:
+                    print(f"{Fore.YELLOW}[!] Gagal menghapus temporary wordlist: {e}{Style.RESET_ALL}")
     
 
     
@@ -817,7 +846,7 @@ class JSAnalyzer:
         
         return html
     
-    def run_analysis(self, wordlist=None, threads=50, timeout=10):
+    def run_analysis(self, wordlist=None, full_wordlist=False, threads=50, timeout=10):
         """Menjalankan analisis lengkap"""
         self.print_banner()
         
@@ -825,7 +854,7 @@ class JSAnalyzer:
             return False
         
         # Step 1: Discovery JS files
-        if not self.discover_js_files(wordlist, threads, timeout):
+        if not self.discover_js_files(wordlist, full_wordlist, threads, timeout):
             print(f"{Fore.RED}[!] Gagal menemukan file .js{Style.RESET_ALL}")
             return False
         
@@ -856,11 +885,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Contoh penggunaan:
-  python js_analyzer.py -u https://example.com
-  python js_analyzer.py -u https://example.com -w /path/to/wordlist.txt
+  python js_analyzer.py -u https://example.com                    # Wordlist kecil (test)
+  python js_analyzer.py -u https://example.com --full-wordlist    # Wordlist lengkap
+  python js_analyzer.py -u https://example.com -w /path/to/wordlist.txt  # Custom wordlist
   python js_analyzer.py -u https://example.com -w wordlist.txt -o results -t 100
   python js_analyzer.py -u https://sf7pentest.sunfishhr.com/
-  python js_analyzer.py -u https://example.com --no-open-browser
         """
     )
     
@@ -869,35 +898,21 @@ Contoh penggunaan:
     parser.add_argument('-o', '--output', default='results',
                        help='Direktori output (default: results)')
     parser.add_argument('-w', '--wordlist',
-                       help='Wordlist untuk feroxbuster (default: /Users/theninja/SF/SecLists/Discovery/Web-Content/raft-medium-directories.txt)')
+                       help='Wordlist untuk feroxbuster (custom path)')
+    parser.add_argument('--full-wordlist', action='store_true',
+                       help='Gunakan wordlist lengkap (default: /Users/theninja/SF/SecLists/Discovery/Web-Content/raft-medium-directories.txt)')
     parser.add_argument('-t', '--threads', type=int, default=50,
                        help='Jumlah threads untuk feroxbuster (default: 50)')
     parser.add_argument('--timeout', type=int, default=10,
                        help='Timeout untuk feroxbuster (default: 10)')
-    parser.add_argument('--no-open-browser', action='store_true',
-                       help='Jangan buka browser secara otomatis setelah selesai')
+
     
     args = parser.parse_args()
     
     analyzer = JSAnalyzer(args.url, args.output)
-    success = analyzer.run_analysis(args.wordlist, args.threads, args.timeout)
+    success = analyzer.run_analysis(args.wordlist, args.full_wordlist, args.threads, args.timeout)
     
-    if success and not args.no_open_browser:
-        # Cek apakah user ingin membuka browser
-        try:
-            import webbrowser
-            report_file = analyzer.output_dir / "final_report.html"
-            if report_file.exists():
-                print(f"\n{Fore.YELLOW}[?] Buka laporan di browser? (y/n): {Style.RESET_ALL}", end="")
-                response = input().lower().strip()
-                if response in ['y', 'yes', 'ya']:
-                    webbrowser.open(f'file://{report_file.absolute()}')
-                    print(f"{Fore.GREEN}[+] Browser dibuka{Style.RESET_ALL}")
-                else:
-                    print(f"{Fore.CYAN}[*] Laporan tersimpan di: {report_file}{Style.RESET_ALL}")
-        except ImportError:
-            print(f"{Fore.CYAN}[*] Laporan tersimpan di: {analyzer.output_dir / 'final_report.html'}{Style.RESET_ALL}")
-    elif success:
+    if success:
         print(f"{Fore.CYAN}[*] Laporan tersimpan di: {analyzer.output_dir / 'final_report.html'}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}[*] Buka manual: open {analyzer.output_dir / 'final_report.html'}{Style.RESET_ALL}")
 
