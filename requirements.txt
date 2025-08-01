@@ -1,0 +1,6 @@
+requests>=2.25.1
+beautifulsoup4>=4.9.3
+colorama>=0.4.4
+tqdm>=4.62.3
+urllib3>=1.26.7
+lxml>=4.6.3 
